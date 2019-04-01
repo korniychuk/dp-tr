@@ -53,7 +53,7 @@ function loadDotEnvConfig() {
   };
   const excludeProjects = process.env.EXCLUDE_PROJECTS;
 
-  if (_.isEmpty(config.jiraUrl) || !/^https?:\/\/.+/.test(config.jiraUserName)) {
+  if (_.isEmpty(config.jiraUrl) || !/^https?:\/\/.+/.test(config.jiraUrl)) {
     throw new Error(`Config: Invalid JIRA_URL`);
   }
   if (_.isEmpty(config.jiraCookies) || !/DWRSESSIONID/.test(config.jiraCookies)) {
@@ -187,7 +187,7 @@ readCsv(reportFile)
 
         return row;
       })
-      .filter(row => !config.has(row.project))
+      .filter(row => !config.excludeProjects.has(row.project))
       .partition(row => row.isValid)
       .value(),
   )
@@ -199,7 +199,15 @@ readCsv(reportFile)
   })
   .then((rows) => {
     // console.log('rows', rows);
+    const maxTaskLength = rows.map(r => r.task).reduce((max, curr) => Math.max(max, curr.length), 0);
+    const maxTimeLength = rows.map(r => durationFormat(r.duration))
+                              .reduce((max, curr) => Math.max(max, curr.length), 0);
     rows.forEach(row => {
+      const baseInfo = [
+        row.date.format('DD-MMM-YYYY'),
+        row.task.padEnd(maxTaskLength),
+        durationFormat(row.duration).padEnd(maxTimeLength),
+      ];
       tempoApi.add(
         row.task,
         row.date,
@@ -207,21 +215,16 @@ readCsv(reportFile)
         row.description,
       ).then(
         (res) => {
-          // @todo: implement automatic aligning by task name and time
           console.log(
             [ res.statusCode,
-              row.date.format('DD-MMM-YYYY'),
-              row.task,
-              durationFormat(row.duration).padEnd(7),
+              ...baseInfo,
               row.description.slice(0, 50) + (row.description.length > 50 ? ' ...' : ''),
             ].join(' | ')
           );
         }, (err) => {
           console.log(
-            [ `[${err.statusCode}]`,
-              row.date.format('DD-MMM-YYYY'),
-              row.task,
-              durationFormat(row.duration).padEnd(7),
+            [ err.statusCode,
+              ...baseInfo,
               err.response.body,
             ].join(' | ')
           );
