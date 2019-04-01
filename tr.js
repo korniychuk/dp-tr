@@ -229,34 +229,48 @@ readCsv(reportFile)
     const maxTaskLength = rows.map(r => r.task).reduce((max, curr) => Math.max(max, curr.length), 0);
     const maxTimeLength = rows.map(r => durationFormat(r.duration))
                               .reduce((max, curr) => Math.max(max, curr.length), 0);
-    rows.forEach(row => {
-      const baseInfo = [
-        row.date.format('DD-MMM-YYYY'),
-        row.task.padEnd(maxTaskLength),
-        durationFormat(row.duration).padEnd(maxTimeLength),
-      ];
-      tempoApi.add(
-        row.task,
-        row.date,
-        row.duration,
-        row.description,
-      ).then(
-        (res) => {
-          console.log(
-            [ res.statusCode,
-              ...baseInfo,
-              row.description.slice(0, 50) + (row.description.length > 50 ? ' ...' : ''),
-            ].join(' | ')
-          );
-        }, (err) => {
-          console.log(
-            [ err.statusCode,
-              ...baseInfo,
-              err.response.body,
-            ].join(' | ')
-          );
-        }
-      );
-    })
+
+    _
+      .chain(rows)
+      .groupBy('task')
+      .values()
+      .forEach((groupedRows) => {
+        groupedRows.reduce(
+          (p, row) => p.then(() => {
+            const baseInfo = [
+              row.date.format('DD-MMM-YYYY'),
+              row.task.padEnd(maxTaskLength),
+              durationFormat(row.duration).padEnd(maxTimeLength),
+            ];
+
+            return tempoApi.add(
+              row.task,
+              row.date,
+              row.duration,
+              row.description,
+            ).then(
+              (res) => {
+                console.log(
+                  [ res.statusCode,
+                    ...baseInfo,
+                    row.description.slice(0, 50) + (row.description.length > 50 ? ' ...' : ''),
+                  ].join(' | ')
+                );
+              }, (err) => {
+                console.log(
+                  [ err.statusCode,
+                    ...baseInfo,
+                    err.response.body,
+                  ].join(' | ')
+                );
+              }
+            );
+          }),
+          Promise.resolve(),
+        );
+
+      })
+      .value();
+
   })
 ;
