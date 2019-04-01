@@ -5,6 +5,10 @@ const csv     = require('csv-parser');
 const fs      = require('fs');
 const _       = require('lodash');
 
+/*
+ * http status 415 from Jira means - incorrect Content-Type header
+ */
+
 const rootDir = (...parts) => path.join(__dirname, ...parts);
 
 function durationFormat(duration) {
@@ -47,14 +51,14 @@ function loadDotEnvConfig() {
   require('dotenv').config();
 
   const config = {
-    jiraUrl: process.env.JIRA_URL,
+    jiraHost: process.env.JIRA_HOST,
     jiraCookies: process.env.JIRA_COOKIES,
     jiraUserName: process.env.JIRA_USER_NAME,
   };
   const excludeProjects = process.env.EXCLUDE_PROJECTS;
 
-  if (_.isEmpty(config.jiraUrl) || !/^https?:\/\/.+/.test(config.jiraUrl)) {
-    throw new Error(`Config: Invalid JIRA_URL`);
+  if (_.isEmpty(config.jiraHost) || /^https?:\/\/.+/.test(config.jiraHost)) {
+    throw new Error(`Config: Invalid JIRA_HOST`);
   }
   if (_.isEmpty(config.jiraCookies) || !/DWRSESSIONID/.test(config.jiraCookies)) {
     throw new Error(`Config: Invalid JIRA_COOKIES`);
@@ -70,10 +74,11 @@ function loadDotEnvConfig() {
 
 class JiraTempoApi {
 
-  constructor({ jiraUrl, jiraUserName, jiraCookies }, req) {
-    this._jiraUrl = jiraUrl;
+  constructor({ jiraHost, jiraUserName, jiraCookies }, req) {
+    this._jiraUrl = `https://${jiraHost}`;
     this._restUrl = this._jiraUrl + '/rest';
     this._tempoUrl = this._restUrl + '/tempo-rest/1.0';
+    this._worklogsUrl = this._tempoUrl + '/worklogs';
 
     this._username = jiraUserName;
 
@@ -81,12 +86,12 @@ class JiraTempoApi {
       gzip: true,
       resolveWithFullResponse: true,
       headers: {
-        'Origin': 'https://sm.heartlandcommerce.com',
+        'Host': jiraHost,
+        'Origin': this._jiraUrl,
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.109 Safari/537.36',
         'Accept-Language': 'ru,ru-RU;q=0.9,en-US;q=0.8,en;q=0.7',
         'X-Requested-With': 'XMLHttpRequest',
         'Accept': '*/*',
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
         'Cookie': jiraCookies,
       },
     });
@@ -98,12 +103,18 @@ class JiraTempoApi {
    * @param duration     moment duration instance
    * @param description  @example 'Some text'
    */
-  add(task, date, duration, description) {
-    const url = this._tempoUrl + `/worklogs/${task}`;
+  async add(task, date, duration, description) {
+    const url = this._worklogsUrl + `/${task}`;
     const d = date.clone().hours(15).minutes(10).seconds(15);
 
-    // @todo: implement real calculation
-    const remaining = moment.duration(1.75, 'hours');
+    const headers = {
+      'Referer': `${this._jiraUrl}/browse/${task}`,
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    };
+
+    /** format: 3h 45m */
+    const remaining = await this.getRemainingEstimate(task, date, duration)
+                                .then(res => res.body);
 
     const form = {
       id:                         /*                      */ '' ,
@@ -131,18 +142,35 @@ class JiraTempoApi {
       comment:                    /* *                    */ description,
     };
 
-    return this._req.post({ url, form });
+    return this._req.post({ url, headers, form });
   }
 
-  getRemainingEstimate() {
-    // @todo: implement it
+  /**
+   * @param task     @example 'XOO-1234'
+   * @param date     moment instance
+   * @param duration moment duration instance
+   * @return string  time in format `{H}h {MM}m`
+   */
+  getRemainingEstimate(task, date, duration) {
+    const date1 = date.format('YYYY-MM-DD');
+    const date2 = date.format('YYYY-MM-DD');
+    const durationStr = encodeURIComponent(durationFormat(duration));
+
+    const url = this._worklogsUrl + `/remainingEstimate/calculate/${task}/${date1}/${date2}/${durationStr}`;
+    const qs = { _: +new Date() };
+
+    const headers = {
+      'Referer': `${this._jiraUrl}/browse/${task}`
+    };
+
+    return this._req.get({ url, qs, headers });
   }
 
   // // date or time
   // update() {
   //
   // }
-  //
+
   // delete() {
   //
   // }
@@ -198,7 +226,6 @@ readCsv(reportFile)
     return validRows;
   })
   .then((rows) => {
-    // console.log('rows', rows);
     const maxTaskLength = rows.map(r => r.task).reduce((max, curr) => Math.max(max, curr.length), 0);
     const maxTimeLength = rows.map(r => durationFormat(r.duration))
                               .reduce((max, curr) => Math.max(max, curr.length), 0);
