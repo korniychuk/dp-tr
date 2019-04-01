@@ -67,7 +67,9 @@ function loadDotEnvConfig() {
     throw new Error(`Config: Invalid JIRA_USER_NAME`);
   }
 
-  config.excludeProjects = new Set(_.isEmpty(excludeProjects) ? [] : excludeProjects.split(','));
+  config.excludeProjects = new Set(_.isEmpty(excludeProjects)
+                                   ? []
+                                   : excludeProjects.toLowerCase().split(','));
 
   return config;
 }
@@ -215,7 +217,7 @@ readCsv(reportFile)
 
         return row;
       })
-      .filter(row => !config.excludeProjects.has(row.project))
+      .filter(row => !config.excludeProjects.has(row.project.toLowerCase()))
       .partition(row => row.isValid)
       .value(),
   )
