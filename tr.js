@@ -223,7 +223,7 @@ readCsv(reportFile)
   )
   .then(([ validRows, invalidRows ]) => {
     if (_.some(invalidRows)) {
-      console.error('Invalid rows:', invalidRows.join(' | '));
+      console.error('Invalid rows:\n' + _.map(invalidRows, v => JSON.stringify(v)).join('\n'));
     }
     return validRows;
   })
