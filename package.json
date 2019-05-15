@@ -16,6 +16,7 @@
     "moment": "^2.24.0",
     "querystring": "^0.2.0",
     "request": "^2.88.0",
-    "request-promise-native": "^1.0.7"
+    "request-promise-native": "^1.0.7",
+    "jsdom": "~15.1.0"
   }
 }

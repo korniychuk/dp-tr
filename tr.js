@@ -4,6 +4,9 @@ const path    = require('path');
 const csv     = require('csv-parser');
 const fs      = require('fs');
 const _       = require('lodash');
+const jsdom   = require('jsdom');
+
+const { JSDOM } = jsdom;
 
 /*
  * http status 415 from Jira means - incorrect Content-Type header
@@ -13,6 +16,17 @@ const rootDir = (...parts) => path.join(__dirname, ...parts);
 
 function durationFormat(duration) {
   return `${duration.hours()}h ${duration.minutes()}m`;
+}
+
+/**
+ * @param {string} strDuration
+ * @return moment duration instance
+ */
+function durationParse(strDuration) {
+  const hours   = /(\d+)h/.test(strDuration) ? +/(\d+)h/.exec(strDuration)[ 1 ] : 0;
+  const minutes = /(\d+)m/.test(strDuration) ? +/(\d+)m/.exec(strDuration)[ 1 ] : 0;
+
+  return moment.duration({ hours, minutes });
 }
 
 function readCsv(filename) {
@@ -54,6 +68,7 @@ function loadDotEnvConfig() {
     jiraHost: process.env.JIRA_HOST,
     jiraCookies: process.env.JIRA_COOKIES,
     jiraUserName: process.env.JIRA_USER_NAME,
+    jiraUserNameHuman: process.env.JIRA_USER_NAME_HUMAN,
   };
   const excludeProjects = process.env.EXCLUDE_PROJECTS;
 
@@ -66,10 +81,15 @@ function loadDotEnvConfig() {
   if (_.isEmpty(config.jiraUserName)) {
     throw new Error(`Config: Invalid JIRA_USER_NAME`);
   }
+  if (_.isEmpty(config.jiraUserNameHuman)) {
+    throw new Error(`Config: Invalid JIRA_USER_NAME_HUMAN`);
+  }
 
   config.excludeProjects = new Set(_.isEmpty(excludeProjects)
                                    ? []
                                    : excludeProjects.toLowerCase().split(','));
+
+  config.jiraUserNameHuman = config.jiraUserNameHuman.toLowerCase();
 
   return config;
 }
@@ -151,7 +171,8 @@ class JiraTempoApi {
    * @param task     @example 'XOO-1234'
    * @param date     moment instance
    * @param duration moment duration instance
-   * @return string  time in format `{H}h {MM}m`
+   *
+   * @return Promise<string> time in format `{H}h {MM}m`
    */
   getRemainingEstimate(task, date, duration) {
     const date1 = date.format('YYYY-MM-DD');
@@ -166,6 +187,38 @@ class JiraTempoApi {
     };
 
     return this._req.get({ url, qs, headers });
+  }
+
+  /**
+   * @param task @example 'XOO-1234'
+   *
+   * @return Promise moment duration instance
+   */
+  getLoggedTime(task) {
+    const url = `${this._jiraUrl}/browse/${task}`;
+
+    const headers = {
+      'Referer': `${this._jiraUrl}/browse/${task}`
+    };
+
+    return this._req.get({ url, headers })
+      .then(res => res.body)
+      .then(page => new JSDOM(page, { runScripts: "outside-only" }))
+      .then(jsDom => {
+        const dlElements = [ ...jsDom.window.document.querySelectorAll('.tempo.tt_inner dl') ];
+        const myElement = dlElements.find(el => el.innerHTML.toLowerCase().indexOf(config.jiraUserNameHuman) > -1);
+        if (myElement) {
+          const durationEl = myElement.querySelector('dd > span:first-child');
+          if (durationEl) {
+            const strDuration = durationEl.innerHTML;
+            if (strDuration) {
+              return durationParse(strDuration);
+            }
+          }
+        }
+        return moment.duration();
+      })
+      ;
   }
 
   // // date or time
@@ -245,28 +298,51 @@ readCsv(reportFile)
               durationFormat(row.duration).padEnd(maxTimeLength),
             ];
 
-            return tempoApi.add(
-              row.task,
-              row.date,
-              row.duration,
-              row.description,
-            ).then(
-              (res) => {
-                console.log(
-                  [ res.statusCode,
-                    ...baseInfo,
-                    row.description.slice(0, 50) + (row.description.length > 50 ? ' ...' : ''),
-                  ].join(' | ')
+            return tempoApi.getLoggedTime(row.task)
+              .then(loggedDuration => {
+                const logged = loggedDuration.asHours();
+                const toLog = row.duration.asHours();
+                if (logged + toLog >= 16) {
+                  throw new Error('More 16 hours.'
+                    + ` ${logged} (logged) + ${toLog} (new) = ${logged + toLog}`);
+                }
+
+                return tempoApi.add(
+                  row.task,
+                  row.date,
+                  row.duration,
+                  row.description,
                 );
-              }, (err) => {
-                console.log(
-                  [ err.statusCode,
-                    ...baseInfo,
-                    err.response.body,
-                  ].join(' | ')
-                );
-              }
-            );
+              })
+              .then(
+                (res) => {
+                  console.log(
+                    [ res.statusCode,
+                      ...baseInfo,
+                      row.description.slice(0, 50) + (row.description.length > 50 ? ' ...' : ''),
+                    ].join(' | ')
+                  );
+                }, (err) => {
+                  if (err.statusCode !== undefined) {
+                    const description = String(err.response.body)
+                      .replace(/\s{2,}/g, ' ');
+
+                    console.log(
+                      [ err.statusCode,
+                        ...baseInfo,
+                        description.slice(0, 50) + (description.length > 50 ? ' ...' : ''),
+                      ].join(' | ')
+                    );
+                  } else {
+                    console.log(
+                      [ 'XXX',
+                        ...baseInfo,
+                        err.message.slice(0, 50) + (err.message.length > 50 ? ' ...' : ''),
+                      ].join(' | ')
+                    );
+                  }
+                }
+              );
           }),
           Promise.resolve(),
         );
