@@ -8,6 +8,8 @@ const jsdom   = require('jsdom');
 
 const { JSDOM } = jsdom;
 
+// @todo: add session check before sending parallel requests
+
 /*
  * http status 415 from Jira means - incorrect Content-Type header
  */
