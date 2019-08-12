@@ -8,7 +8,6 @@ const jsdom   = require('jsdom');
 
 const { JSDOM } = jsdom;
 
-// @todo: add session check before sending parallel requests
 // @todo: implement authorization by login/password because COOKIEs is unstable
 
 /*
@@ -78,7 +77,7 @@ function loadDotEnvConfig() {
   if (_.isEmpty(config.jiraHost) || /^https?:\/\/.+/.test(config.jiraHost)) {
     throw new Error(`Config: Invalid JIRA_HOST`);
   }
-  if (_.isEmpty(config.jiraCookies) /*|| !/DWRSESSIONID/.test(config.jiraCookies)*/) {
+  if (_.isEmpty(config.jiraCookies)) {
     throw new Error(`Config: Invalid JIRA_COOKIES`);
   }
   if (_.isEmpty(config.jiraUserName)) {
@@ -171,13 +170,12 @@ class JiraTempoApi {
   }
 
   /**
-   * @todo: implement me
    * @return Promise<boolean>
    */
   async isCookiesValid() {
-    // const url = this._jiraUrl + `/secure/projectavatar`;
-    // return this._req.get({ url }).then(() => true, () => false);
-    return true;
+    const url = `${this._restUrl}/tempo-timesheets/3/private/config`;
+
+    return this._req.get({url}).then(() => true, () => false);
   }
 
   /**
