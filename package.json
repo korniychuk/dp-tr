@@ -4,19 +4,27 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node ./tr.js",
+    "start": "ts-node ./src/tr.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "csv-parser": "^2.2.0",
-    "dotenv": "^7.0.0",
-    "lodash": "^4.17.11",
-    "moment": "^2.24.0",
-    "querystring": "^0.2.0",
-    "request": "^2.88.0",
-    "request-promise-native": "^1.0.7",
-    "jsdom": "~15.1.0"
+    "@types/node": "~12.7.1",
+    "@types/lodash": "~4.14.136",
+    "@types/moment": "~2.13.0",
+    "@types/dotenv": "~6.1.1",
+    "@types/request": "~2.48.2",
+    "@types/request-promise-native": "~1.0.16",
+    "csv-parser": "~2.2.0",
+    "dotenv": "~7.0.0",
+    "lodash": "~4.17.11",
+    "moment": "~2.24.0",
+    "querystring": "~0.2.0",
+    "request": "~2.88.0",
+    "request-promise-native": "~1.0.7",
+    "jsdom": "~15.1.0",
+    "ts-node": "~8.3.0",
+    "typescript": "~3.5.3"
   }
 }
