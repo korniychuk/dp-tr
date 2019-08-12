@@ -1,5 +1,7 @@
 # dp-tr
 
+![Time Report Sync](img/console.png)
+
 ### Requirements
 
 - NodeJS & NPM
