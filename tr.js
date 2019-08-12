@@ -9,6 +9,7 @@ const jsdom   = require('jsdom');
 const { JSDOM } = jsdom;
 
 // @todo: add session check before sending parallel requests
+// @todo: implement authorization by login/password because COOKIEs is unstable
 
 /*
  * http status 415 from Jira means - incorrect Content-Type header
@@ -77,7 +78,7 @@ function loadDotEnvConfig() {
   if (_.isEmpty(config.jiraHost) || /^https?:\/\/.+/.test(config.jiraHost)) {
     throw new Error(`Config: Invalid JIRA_HOST`);
   }
-  if (_.isEmpty(config.jiraCookies) || !/DWRSESSIONID/.test(config.jiraCookies)) {
+  if (_.isEmpty(config.jiraCookies) /*|| !/DWRSESSIONID/.test(config.jiraCookies)*/) {
     throw new Error(`Config: Invalid JIRA_COOKIES`);
   }
   if (_.isEmpty(config.jiraUserName)) {
@@ -122,7 +123,7 @@ class JiraTempoApi {
   }
 
   /**
-   * @param task         @example 'XOO-1234'
+   * @param task         @example 'XXX-1234'
    * @param date         moment instance
    * @param duration     moment duration instance
    * @param description  @example 'Some text'
@@ -154,10 +155,10 @@ class JiraTempoApi {
       startTimeEnabled:           /*                      */ 'true',
       actionType:                 /* *                    */ 'logTime',
       tracker:                    /* *                    */ 'false',
-      preSelectedIssue:           /*    'XOO-1234'        */ task,
+      preSelectedIssue:           /*    'XXX-1234'        */ task,
       planning:                   /*                      */ 'false',
       selectedUser:               /* *                    */ this._username,
-      issue:                      /*    'XOO-1234'        */ task,
+      issue:                      /*    'XXX-1234'        */ task,
       date:                       /*    'Mar 29, 2019'    */ d.format('MMM DD, YYYY'),
       enddate:                    /*    'Mar 29, 2019'    */ d.format('MMM DD, YYYY'),
       worklogtime:                /*    '1:34 pm'         */ d.format('LT').toLowerCase(),
@@ -170,7 +171,17 @@ class JiraTempoApi {
   }
 
   /**
-   * @param task     @example 'XOO-1234'
+   * @todo: implement me
+   * @return Promise<boolean>
+   */
+  async isCookiesValid() {
+    // const url = this._jiraUrl + `/secure/projectavatar`;
+    // return this._req.get({ url }).then(() => true, () => false);
+    return true;
+  }
+
+  /**
+   * @param task     @example 'XXX-1234'
    * @param date     moment instance
    * @param duration moment duration instance
    *
@@ -192,7 +203,7 @@ class JiraTempoApi {
   }
 
   /**
-   * @param task @example 'XOO-1234'
+   * @param task @example 'XXX-1234'
    *
    * @return Promise moment duration instance
    */
@@ -236,7 +247,7 @@ class JiraTempoApi {
 }
 //
 // tempoApi.add(
-//   'XOO-1234',
+//   'XXX-1234',
 //   moment(),
 //   moment.duration(1.25, 'hours'),
 //   'dev time'
@@ -252,105 +263,116 @@ class JiraTempoApi {
 const config = loadDotEnvConfig();
 const tempoApi = new JiraTempoApi(config, request);
 
-const reportFile = rootDir('data.csv');
-readCsv(reportFile)
-  .then((rows) =>
-    _.chain(rows)
-      .map(row => {
-        row.date = moment(row.date, 'DD-MMM-YYYY');
-        row.isDateValid = row.date.isValid();
+init();
 
-        const duration = +row.duration;
-        row.isDurationValid = Number.isFinite(duration)
-                                           && duration >= .25
-                                           && duration % 0.25 === 0;
-        row.duration = row.isDurationValid ? moment.duration(duration, 'hours') : 0;
+async function init() {
+  const isCookiesValid = await tempoApi.isCookiesValid();
+  if (!isCookiesValid) {
+    return console.error('Wrong cookies');
+  }
 
-        row.isValid = row.isDateValid
-                   && row.isDurationValid
-        ;
+  const reportFile = rootDir('data.csv');
+  readCsv(reportFile)
+    .then((rows) =>
+      _.chain(rows)
+        .map(row => {
+          row.date = moment(row.date, 'DD-MMM-YYYY');
+          row.isDateValid = row.date.isValid();
 
-        return row;
-      })
-      .filter(row => !config.excludeProjects.has(row.project.toLowerCase()))
-      .partition(row => row.isValid)
-      .value(),
-  )
-  .then(([ validRows, invalidRows ]) => {
-    if (_.some(invalidRows)) {
-      console.error('Invalid rows:\n' + _.map(invalidRows, v => JSON.stringify(v)).join('\n'));
-    }
-    return validRows;
-  })
-  .then((rows) => {
-    const maxTaskLength = rows.map(r => r.task).reduce((max, curr) => Math.max(max, curr.length), 0);
-    const maxTimeLength = rows.map(r => durationFormat(r.duration))
-                              .reduce((max, curr) => Math.max(max, curr.length), 0);
+          const duration = +row.duration;
+          row.isDurationValid = Number.isFinite(duration)
+            && duration >= .25
+            && duration % 0.25 === 0;
+          row.duration = row.isDurationValid ? moment.duration(duration, 'hours') : 0;
 
-    _
-      .chain(rows)
-      .groupBy('task')
-      .values()
-      .forEach((groupedRows) => {
-        groupedRows.reduce(
-          (p, row) => p.then(() => {
-            const baseInfo = [
-              row.date.format('DD-MMM-YYYY'),
-              row.task.padEnd(maxTaskLength),
-              durationFormat(row.duration).padEnd(maxTimeLength),
-            ];
+          row.isValid = row.isDateValid
+            && row.isDurationValid
+          ;
 
-            return tempoApi.getLoggedTime(row.task)
-              .then(loggedDuration => {
-                const logged = loggedDuration.asHours();
-                const toLog = row.duration.asHours();
-                if (logged + toLog >= 16) {
-                  throw new Error('More 16 hours.'
-                    + ` ${logged} (logged) + ${toLog} (new) = ${logged + toLog}`);
-                }
+          return row;
+        })
+        .filter(row => !config.excludeProjects.has(row.project.toLowerCase()))
+        .partition(row => row.isValid)
+        .value(),
+    )
+    .then(([ validRows, invalidRows ]) => {
+      if (_.some(invalidRows)) {
+        console.error('Invalid rows:\n' + _.map(invalidRows, v => JSON.stringify(v)).join('\n'));
+      }
+      return validRows;
+    })
+    .then((rows) => {
+      const maxTaskLength = rows.map(r => r.task).reduce((max, curr) => Math.max(max, curr.length), 0);
+      const maxTimeLength = rows.map(r => durationFormat(r.duration))
+        .reduce((max, curr) => Math.max(max, curr.length), 0);
 
-                return tempoApi.add(
-                  row.task,
-                  row.date,
-                  row.duration,
-                  row.description,
-                );
-              })
-              .then(
-                (res) => {
-                  console.log(
-                    [ res.statusCode,
-                      ...baseInfo,
-                      row.description.slice(0, 50) + (row.description.length > 50 ? ' ...' : ''),
-                    ].join(' | ')
+      _
+        .chain(rows)
+        .groupBy('task')
+        .values()
+        .forEach((groupedRows) => {
+          groupedRows.reduce(
+            (p, row) => p.then(() => {
+              const baseInfo = [
+                row.date.format('DD-MMM-YYYY'),
+                row.task.padEnd(maxTaskLength),
+                durationFormat(row.duration).padEnd(maxTimeLength),
+              ];
+
+              return tempoApi.getLoggedTime(row.task)
+                .then(loggedDuration => {
+                  const logged = loggedDuration.asHours();
+                  const toLog = row.duration.asHours();
+
+                  // @todo: implement configurable validation
+                  // if (logged + toLog > 16) {
+                  //   throw new Error('More 16 hours.'
+                  //     + ` ${logged} (logged) + ${toLog} (new) = ${logged + toLog}`);
+                  // }
+
+                  return tempoApi.add(
+                    row.task,
+                    row.date,
+                    row.duration,
+                    row.description,
                   );
-                }, (err) => {
-                  if (err.statusCode !== undefined) {
-                    const description = String(err.response.body)
-                      .replace(/\s{2,}/g, ' ');
+                })
+                .then(
+                  (res) => {
+                    console.log(
+                      [ res.statusCode,
+                        ...baseInfo,
+                        row.description.slice(0, 50) + (row.description.length > 50 ? ' ...' : ''),
+                      ].join(' | ')
+                    );
+                  }, (err) => {
+                    if (err.statusCode !== undefined) {
+                      const description = String(err.response.body)
+                        .replace(/\s{2,}/g, ' ');
 
-                    console.log(
-                      [ err.statusCode,
-                        ...baseInfo,
-                        description.slice(0, 50) + (description.length > 50 ? ' ...' : ''),
-                      ].join(' | ')
-                    );
-                  } else {
-                    console.log(
-                      [ 'XXX',
-                        ...baseInfo,
-                        err.message.slice(0, 50) + (err.message.length > 50 ? ' ...' : ''),
-                      ].join(' | ')
-                    );
+                      console.log(
+                        [ err.statusCode,
+                          ...baseInfo,
+                          description.slice(0, 50) + (description.length > 50 ? ' ...' : ''),
+                        ].join(' | ')
+                      );
+                    } else {
+                      console.log(
+                        [ 'XXX',
+                          ...baseInfo,
+                          err.message.slice(0, 50) + (err.message.length > 50 ? ' ...' : ''),
+                        ].join(' | ')
+                      );
+                    }
                   }
-                }
-              );
-          }),
-          Promise.resolve(),
-        );
+                );
+            }),
+            Promise.resolve(),
+          );
 
-      })
-      .value();
+        })
+        .value();
 
-  })
-;
+    })
+  ;
+} // init()
