@@ -2,6 +2,8 @@ import * as csv from 'csv-parser';
 import * as fs from 'fs';
 import * as moment from 'moment';
 import * as _ from 'lodash';
+import * as path from 'path';
+
 import { Config } from './config';
 
 export function durationFormat(duration) {
@@ -18,6 +20,8 @@ export function durationParse(strDuration) {
 
   return moment.duration({ hours, minutes });
 }
+
+export const rootDir = (...parts) => path.join(__dirname, '..', ...parts);
 
 export function readCsv(filename) {
   return new Promise(function (resolve, reject) {
@@ -61,17 +65,21 @@ export function loadDotEnvConfig(): Config {
 
   const config: Config = {
     excludeProjects,
-    jiraHost:          process.env.JIRA_HOST,
-    jiraCookies:       process.env.JIRA_COOKIES,
-    jiraUserName:      process.env.JIRA_USER_NAME,
-    jiraUserNameHuman: process.env.JIRA_USER_NAME_HUMAN,
+    jiraHost:          _.trim(process.env.JIRA_HOST),
+    jiraUserName:      _.trim(process.env.JIRA_USER_NAME),
+    jiraUserNameHuman: _.trim(process.env.JIRA_USER_NAME_HUMAN),
+    jiraLogin:         _.trim(process.env.JIRA_LOGIN),
+    jiraPassword:      _.trim(process.env.JIRA_PASSWORD),
   };
 
   if (_.isEmpty(config.jiraHost) || /^https?:\/\/.+/.test(config.jiraHost)) {
     throw new Error(`Config: Invalid JIRA_HOST`);
   }
-  if (_.isEmpty(config.jiraCookies)) {
-    throw new Error(`Config: Invalid JIRA_COOKIES`);
+  if (_.isEmpty(config.jiraLogin)) {
+    throw new Error(`Config: Invalid JIRA_LOGIN`);
+  }
+  if (_.isEmpty(config.jiraPassword)) {
+    throw new Error(`Config: Invalid JIRA_PASSWORD`);
   }
   if (_.isEmpty(config.jiraUserName)) {
     throw new Error(`Config: Invalid JIRA_USER_NAME`);

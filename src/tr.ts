@@ -1,14 +1,10 @@
-import * as request from 'request-promise-native';
-import * as moment  from 'moment';
-import * as path    from 'path';
-import * as _       from 'lodash';
+import * as moment from 'moment';
+import * as _ from 'lodash';
 
-const { JiraTempoApi } = require('./jira-api');
-const { durationFormat, loadDotEnvConfig, readCsv } = require('./helpers');
+import { Session } from './session';
+import { JiraTempoApi } from './jira-api';
+import { durationFormat, loadDotEnvConfig, readCsv, rootDir } from './helpers';
 
-const rootDir = (...parts) => path.join(__dirname, ...parts);
-
-//
 // tempoApi.add(
 //   'XXX-1234',
 //   moment(),
@@ -23,17 +19,15 @@ const rootDir = (...parts) => path.join(__dirname, ...parts);
 //   }
 // );
 
+const session = new Session(rootDir('.session.json'));
+
 const config = loadDotEnvConfig();
-const tempoApi = new JiraTempoApi(config, request);
+const jiraApi = new JiraTempoApi(config, session);
 
 init();
 
 async function init() {
-  const isCookiesValid = await tempoApi.isCookiesValid();
-  if (!isCookiesValid) {
-    return console.error('Wrong cookies');
-  }
-  return false;
+  await jiraApi.auth();
 
   const reportFile = rootDir('data.csv');
   readCsv(reportFile)
@@ -83,7 +77,7 @@ async function init() {
                 durationFormat(row.duration).padEnd(maxTimeLength),
               ];
 
-              return tempoApi.getLoggedTime(row.task)
+              return jiraApi.getLoggedTime(row.task)
                 .then(loggedDuration => {
                   const logged = loggedDuration.asHours();
                   const toLog = row.duration.asHours();
@@ -94,7 +88,7 @@ async function init() {
                   //     + ` ${logged} (logged) + ${toLog} (new) = ${logged + toLog}`);
                   // }
 
-                  return tempoApi.add(
+                  return jiraApi.add(
                     row.task,
                     row.date,
                     row.duration,

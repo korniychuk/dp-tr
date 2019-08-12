@@ -1,9 +1,12 @@
 import * as jsdom from 'jsdom';
 import * as moment  from 'moment';
+import { Response } from 'request';
+import { RequestPromiseAPI } from 'request-promise-native';
+import * as request from 'request-promise-native';
 
 import { durationFormat, durationParse } from './helpers';
-import { RequestPromiseAPI } from 'request-promise-native';
 import { Config } from './config';
+import { Session } from './session';
 
 const { JSDOM } = jsdom;
 
@@ -18,24 +21,71 @@ export class JiraTempoApi {
   private worklogsUrl: string;
   private req: RequestPromiseAPI;
 
-  public constructor(private config: Config, req: RequestPromiseAPI) {
+  public constructor(
+    private config: Config,
+    private session: Session,
+  ) {
     this.jiraUrl     = `https://${ config.jiraHost }`;
     this.restUrl     = this.jiraUrl + '/rest';
     this.tempoUrl    = this.restUrl + '/tempo-rest/1.0';
     this.worklogsUrl = this.tempoUrl + '/worklogs';
 
-    this.req = req.defaults({
-      gzip:                    true,
-      resolveWithFullResponse: true,
-      headers:                 {
-        'Host':             config.jiraHost,
-        'Origin':           this.jiraUrl,
-        'User-Agent':       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.109 Safari/537.36',
-        'Accept-Language':  'ru,ru-RU;q=0.9,en-US;q=0.8,en;q=0.7',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Accept':           '*/*',
-        'Cookie':           config.jiraCookies,
-      },
+    this.setupRequest();
+  }
+
+  /**
+   * Loads Jira session
+   * @returns is session successfully opened or not
+   */
+  public async auth(): Promise<void> {
+    this.session.load();
+
+    if (this.session.data.cookies && await this.isCookiesValid(this.session.data.cookies)) {
+      this.setupRequest(this.session.data.cookies);
+      console.log('Using already opened Jira session');
+      return;
+    }
+
+    console.log('Authenticating to Jira...');
+    const cookies = await this.login(this.config.jiraLogin, this.config.jiraPassword);
+    const isOk = await this.isCookiesValid(cookies);
+    if (!isOk) {
+      throw new Error(`Auth() Logged in successful, but test cookies request failed.`);
+    }
+
+    console.log('New Cookies:', cookies);
+    this.session.data.cookies = cookies;
+    this.session.save();
+    console.log('Session saved.');
+    this.setupRequest(this.session.data.cookies);
+    console.log('Session opened.');
+
+  }
+
+  /**
+   * Do login and returns cookies.
+   * Notice: takes login and password from the config.
+   * @param login    jira login
+   * @param password jira password
+   */
+  public login(login: string, password: string): Promise<string> {
+    const url = `${this.restUrl}/gadget/1.0/login`;
+    const form = {
+      os_username: login,
+      os_password: password,
+      os_cookie: true,
+    };
+
+    return this.req.post({ url, form }).then((res: Response) => {
+      const body = JSON.parse(res.body);
+      if (body.captchaFailure) {
+        throw new Error(`Login() Captcha requested. You need to logout and login via the browser`);
+      } else if (body.loginSucceeded) {
+        const cookies: string[] = res.caseless.get('Set-Cookie');
+        return cookies.join('; ');
+      }
+      throw new Error(`Login() Wrong login and/or password.\nStatus: ${res.statusCode}.\nBody: ${res.body}`);
+      // throw new Error(`Login() Can not login by unknown reason. Wrong response. Status: ${e.statusCode}`);
     });
   }
 
@@ -90,10 +140,11 @@ export class JiraTempoApi {
   /**
    * @return Promise<boolean>
    */
-  public async isCookiesValid(): Promise<boolean> {
+  public async isCookiesValid(cookies?: string): Promise<boolean> {
     const url = `${ this.restUrl }/tempo-timesheets/3/private/config`;
 
-    return this.req.get({ url }).then(() => true, () => false);
+    const headers = cookies ? { 'Cookie': cookies } : {};
+    return this.req.get({ url, headers }).then(() => true, () => false);
   }
 
   /**
@@ -160,5 +211,26 @@ export class JiraTempoApi {
   //
   // }
 
+
+  private setupRequest(cookies?: string): void {
+    const headers = {
+      'Host':             this.config.jiraHost,
+      'Origin':           this.jiraUrl,
+      'User-Agent':       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.109 Safari/537.36',
+      'Accept-Language':  'ru,ru-RU;q=0.9,en-US;q=0.8,en;q=0.7',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Accept':           '*/*',
+    };
+    if (cookies) {
+      headers['Cookie'] = cookies;
+    }
+
+      this.req = request.defaults({
+      gzip: true,
+      resolveWithFullResponse: true,
+      headers,
+    });
+
+  }
 
 }
