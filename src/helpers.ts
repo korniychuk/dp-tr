@@ -23,7 +23,16 @@ export function durationParse(strDuration) {
 
 export const rootDir = (...parts) => path.join(__dirname, '..', ...parts);
 
-export function readCsv(filename) {
+export interface Row {
+  date: string;
+  project: string;
+  task: string;
+  type: string;
+  description: string;
+  duration: string;
+}
+
+export function readCsv(filename): Promise<Row[]> {
   return new Promise(function (resolve, reject) {
     function onError(err) {
       reject(err);
@@ -31,7 +40,7 @@ export function readCsv(filename) {
 
     function onReadable() {
       cleanup();
-      resolve(stream);
+      resolve(stream as any);
     }
 
     function cleanup() {

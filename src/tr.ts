@@ -1,9 +1,10 @@
 import * as moment from 'moment';
+import * as __ from 'lodash/fp';
 import * as _ from 'lodash';
 
 import { Session } from './session';
 import { JiraTempoApi } from './jira-api';
-import { durationFormat, loadDotEnvConfig, readCsv, rootDir } from './helpers';
+import { durationFormat, loadDotEnvConfig, readCsv, rootDir, Row } from './helpers';
 
 // tempoApi.add(
 //   'XXX-1234',
@@ -31,9 +32,10 @@ async function init() {
 
   const reportFile = rootDir('data.csv');
   readCsv(reportFile)
-    .then((rows) =>
-      _.chain(rows)
-        .map(row => {
+    .then((rows: Row[]) =>
+      __.flow(
+        // @todo: remove any and specify an interface
+        __.map((row: any) => {
           row.date = moment(row.date, 'DD-MMM-YYYY');
           row.isDateValid = row.date.isValid();
 
@@ -48,10 +50,10 @@ async function init() {
           ;
 
           return row;
-        })
-        .filter(row => !config.excludeProjects.has(row.project.toLowerCase()))
-        .partition(row => row.isValid)
-        .value(),
+        }),
+        __.filter(row => !config.excludeProjects.has(row.project.toLowerCase())),
+        __.partition(row => row.isValid),
+      )(rows),
     )
     .then(([ validRows, invalidRows ]) => {
       if (_.some(invalidRows)) {
