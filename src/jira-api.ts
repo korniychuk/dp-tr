@@ -12,12 +12,11 @@ const { JSDOM } = jsdom;
 
 /*
  * http status 415 from Jira means - incorrect Content-Type header
- * @todo: implement authorization by login/password because COOKIEs is unstable
  */
 export class JiraTempoApi {
-  private jiraUrl: string;
-  private restUrl: string;
-  private tempoUrl: string;
+  private readonly jiraUrl: string;
+  private readonly restUrl: string;
+  private readonly tempoUrl: string;
   private worklogsUrl: string;
   private req: RequestPromiseAPI;
 
@@ -95,46 +94,38 @@ export class JiraTempoApi {
    * @param duration     moment duration instance
    * @param description  @example 'Some text'
    */
-  public async add(task, date, duration, description) {
-    const url = this.worklogsUrl + `/${ task }`;
+  public async add(
+    task: string,
+    date: moment.Moment,
+    duration: moment.Duration,
+    description?: string,
+  ) {
+    const url = this.restUrl + `/tempo-timesheets/4/worklogs/`;
     const d   = date.clone().hours(15).minutes(10).seconds(15);
 
     const headers = {
       'Referer':      `${ this.jiraUrl }/browse/${ task }`,
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
     };
 
-    /** format: 3h 45m */
-    const remaining = await this.getRemainingEstimate(task, date, duration)
-      .then(res => res.body);
+    const id: number = await this.getIssueIdByTaks(task);
 
-    const form = {
-      id:                         /*                      */ '',
-      type:                       /*                      */ 'issue',
-      'use-ISO8061-week-numbers': /*                      */ 'false',
-      ansidate:                   /* * '2019-03-29T13:34' */ d.format('YYYY-MM-DDTHH:mm'),
-      ansienddate:                /*   '2019-03-29'       */ d.format('YYYY-MM-DD'),
-      'selected-panel':           /*                      */ '',
-      'analytics-origin-page':    /*                      */ 'Issue Search or Issue View',
-      'analytics-origin-view':    /*                      */ 'Tempo Issue Panel',
-      'analytics-origin-action':  /*                      */ 'Clicked Log Work Button',
-      'analytics-page-category':  /*                      */ 'JIRA',
-      startTimeEnabled:           /*                      */ 'true',
-      actionType:                 /* *                    */ 'logTime',
-      tracker:                    /* *                    */ 'false',
-      preSelectedIssue:           /*    'XXX-1234'        */ task,
-      planning:                   /*                      */ 'false',
-      selectedUser:               /* *                    */ this.config.jiraUserName,
-      issue:                      /*    'XXX-1234'        */ task,
-      date:                       /*    'Mar 29, 2019'    */ d.format('MMM DD, YYYY'),
-      enddate:                    /*    'Mar 29, 2019'    */ d.format('MMM DD, YYYY'),
-      worklogtime:                /*    '1:34 pm'         */ d.format('LT').toLowerCase(),
-      time:                       /* *  '1.25'            */ durationFormat(duration),
-      remainingEstimate:          /* *  '2h'              */ remaining,
-      comment:                    /* *                    */ description,
+    /** format: number of seconds */
+    const remaining = await this.getRemainingEstimate(id, task, duration);
+
+    const json = {
+      attributes:                                                      {},
+      billableSeconds:                                                 '',
+      comment:                                                         description || null,
+      endDate:                                                         null,
+      includeNonWorkingDays:                                           false,
+      originTaskId:                  /* * '320411'                  */ String(id),
+      remainingEstimate:             /* * 1800                      */ remaining,
+      started:                       /* * '2019-08-29T16:02:52.233' */ d.toISOString(),
+      timeSpentSeconds:              /* * 1800                      */ duration.asSeconds(),
+      worker:                        /* * 'firstname.lastname'      */ this.config.jiraUserName,
     };
 
-    return this.req.post({ url, headers, form });
+    return this.req.post({ url, headers, json });
   }
 
   /**
@@ -148,25 +139,65 @@ export class JiraTempoApi {
   }
 
   /**
-   * @param task     @example 'XXX-1234'
-   * @param date     moment instance
-   * @param duration moment duration instance
-   *
-   * @return Promise<string> time in format `{H}h {MM}m`
+   * @return number of seconds
    */
-  public getRemainingEstimate(task, date, duration) {
-    const date1 = date.format('YYYY-MM-DD');
-    const date2 = date.format('YYYY-MM-DD');
-    const durationStr = encodeURIComponent(durationFormat(duration));
-
-    const url = this.worklogsUrl + `/remainingEstimate/calculate/${ task }/${ date1 }/${ date2 }/${ durationStr }`;
+  public getRemainingEstimate(id: number, task: string, duration: moment.Duration): Promise<number> {
+    const url = this.restUrl + '/api/2/search/';
     const qs  = { _: +new Date() };
+
+    const headers = {
+      'Referer': `${ this.jiraUrl }/browse/${ task }`,
+    };
+
+    const json = {
+      jql: `issue in (${id})`,
+      fields: [
+        'timeestimate',
+      ],
+      startAt: 0,
+      maxResults: 200,
+    };
+
+    return this.req.post({ url, qs, headers, json }).then(res => {
+      const body = res.body;
+
+      const beforeThisTracking = body.issues
+                              && body.issues[0]
+                              && body.issues[0].fields
+                              && body.issues[0].fields.timeestimate;
+
+      const after = beforeThisTracking - duration.asSeconds();
+      return after >= 0 ? after : 0;
+    });
+  }
+
+  /**
+   * @todo: this is the same request to {@link getLoggedTime}. Merge it.
+   * @param task @example 'XXX-1234'
+   * @returns id of the task
+   */
+  public getIssueIdByTaks(task: string): Promise<number> {
+    const url = `${ this.jiraUrl }/browse/${ task }`;
 
     const headers = {
       'Referer': `${ this.jiraUrl }/browse/${ task }`
     };
 
-    return this.req.get({ url, qs, headers });
+    return this.req.get({ url, headers })
+       .then(res => res.body)
+       .then(page => new JSDOM(page, { runScripts: 'outside-only' }))
+       .then(jsDom => {
+         const id: number | undefined = [...jsDom.window.document.querySelectorAll('[data-issue-id]')]
+           .map(el$ => +el$.getAttribute('data-issue-id'))
+           .find(Boolean);
+
+         if (!id) {
+           throw new Error(`Can not find ID by Task: ${task}`);
+         }
+
+         return id;
+       });
+
   }
 
   /**
