@@ -20,6 +20,8 @@ import { durationFormat, loadDotEnvConfig, readCsv, rootDir, Row } from './helpe
 //   }
 // );
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(() => resolve(), ms));
+
 const session = new Session(rootDir('.session.json'));
 
 const config = loadDotEnvConfig();
@@ -80,7 +82,7 @@ async function init() {
               ];
 
               return jiraApi.getLoggedTime(row.task)
-                .then(loggedDuration => {
+                .then(async (loggedDuration) => {
                   const logged = loggedDuration.asHours();
                   const toLog = row.duration.asHours();
 
@@ -90,12 +92,14 @@ async function init() {
                   //     + ` ${logged} (logged) + ${toLog} (new) = ${logged + toLog}`);
                   // }
 
-                  return jiraApi.add(
+                  const res = await jiraApi.add(
                     row.task,
                     row.date,
                     row.duration,
                     row.description,
                   );
+                  // await delay(500);
+                  return res;
                 })
                 .then(
                   (res) => {
