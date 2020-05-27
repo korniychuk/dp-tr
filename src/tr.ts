@@ -63,80 +63,84 @@ async function init() {
       }
       return validRows;
     })
-    .then((rows) => {
+    .then(async (rows) => {
       const maxTaskLength = rows.map(r => r.task).reduce((max, curr) => Math.max(max, curr.length), 0);
       const maxTimeLength = rows.map(r => durationFormat(r.duration))
         .reduce((max, curr) => Math.max(max, curr.length), 0);
 
-      _
-        .chain(rows)
-        .groupBy('task')
-        .values()
-        .forEach((groupedRows) => {
-          groupedRows.reduce(
-            (p, row) => p.then(() => {
-              const baseInfo = [
+        const saveRow = (row) => {
+            const baseInfo = [
                 row.date.format('DD-MMM-YYYY'),
                 row.task.padEnd(maxTaskLength),
                 durationFormat(row.duration).padEnd(maxTimeLength),
-              ];
+            ];
 
-              return jiraApi.getLoggedTime(row.task)
-                .then(async (loggedDuration) => {
-                  const logged = loggedDuration.asHours();
-                  const toLog = row.duration.asHours();
+            return jiraApi.getLoggedTime(row.task)
+                          .then(async (loggedDuration) => {
+                              const logged = loggedDuration.asHours();
+                              const toLog = row.duration.asHours();
 
-                  // @todo: implement configurable validation
-                  // if (logged + toLog > 16) {
-                  //   throw new Error('More 16 hours.'
-                  //     + ` ${logged} (logged) + ${toLog} (new) = ${logged + toLog}`);
-                  // }
+                              // @todo: implement configurable validation
+                              // if (logged + toLog > 16) {
+                              //   throw new Error('More 16 hours.'
+                              //     + ` ${logged} (logged) + ${toLog} (new) = ${logged + toLog}`);
+                              // }
 
-                  const res = await jiraApi.add(
-                    row.task,
-                    row.date,
-                    row.duration,
-                    row.description,
-                  );
-                  // await delay(500);
-                  return res;
-                })
-                .then(
-                  (res) => {
-                    console.log(
-                      [ res.statusCode,
-                        ...baseInfo,
-                        row.description.slice(0, 50) + (row.description.length > 50 ? ' ...' : ''),
-                      ].join(' | ')
-                    );
-                  }, (err) => {
-                    if (err.statusCode !== undefined) {
-                      const description = String(err.response.body)
-                        .replace(/\s{2,}/g, ' ');
+                              const res = await jiraApi.add(
+                                  row.task,
+                                  row.date,
+                                  row.duration,
+                                  row.description,
+                              );
+                              // await delay(500);
+                              return res;
+                          })
+                          .then(
+                              (res) => {
+                                  console.log(
+                                      [ res.statusCode,
+                                          ...baseInfo,
+                                          row.description.slice(0, 50) + (row.description.length > 50 ? ' ...' : ''),
+                                      ].join(' | ')
+                                  );
+                              }, (err) => {
+                                  if (err.statusCode !== undefined) {
+                                      const description = String(err.response.body)
+                                          .replace(/\s{2,}/g, ' ');
 
-                      console.log(
-                        [ err.statusCode,
-                          ...baseInfo,
-                          description.slice(0, 50) + (description.length > 50 ? ' ...' : ''),
-                        ].join(' | ')
-                      );
-                    } else {
-                      console.log(
-                        [ 'XXX',
-                          ...baseInfo,
-                          err.message.slice(0, 50) + (err.message.length > 50 ? ' ...' : ''),
-                        ].join(' | ')
-                      );
-                    }
-                  }
-                );
-            }),
-            Promise.resolve(),
-          );
+                                      console.log(
+                                          [ err.statusCode,
+                                              ...baseInfo,
+                                              description.slice(0, 50) + (description.length > 50 ? ' ...' : ''),
+                                          ].join(' | ')
+                                      );
+                                  } else {
+                                      console.log(
+                                          [ 'XXX',
+                                              ...baseInfo,
+                                              err.message.slice(0, 50) + (err.message.length > 50 ? ' ...' : ''),
+                                          ].join(' | ')
+                                      );
+                                  }
+                              }
+                          );
+        }
 
-        })
-        .value();
+        for (const row of rows) await saveRow(row);
+      // _
+      //   .chain(rows)
+      //   .groupBy('task')
+      //   .values()
+      //   .forEach((groupedRows) => {
+      //     groupedRows.reduce(
+      //       (p, row) => p.then(),
+      //       Promise.resolve(),
+      //     );
+      //
+      //   })
+      //   .value();
 
     })
   ;
 } // init()
+
